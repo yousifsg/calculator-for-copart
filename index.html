@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مِسبار للاستيراد</title>
+<link rel="stylesheet" href="lib/app.css">
+</head>
+<body>
+<header>
+<h1>مِسبار للاستيراد</h1>
+<p>احسب التكلفة الكاملة لسيارة من Copart حتى وصولها إلى عُمان.</p>
+</header>
+<main>
+<section aria-labelledby="h-car">
+<h2 id="h-car">بيانات السيارة</h2>
+<label for="link">رابط اللوت في Copart</label>
+<input id="link" class="num" placeholder="https://www.copart.com/lot/12345678">
+<div class="row">
+<div><label for="lot">رقم اللوت</label><input id="lot" class="num"></div>
+<div><label for="yard">الساحة</label><input id="yard"></div>
+</div>
+<label for="vin">رقم الهيكل (VIN)</label>
+<input id="vin" class="num" maxlength="17" autocapitalize="characters">
+<div class="bar">
+<button class="ghost" id="pdfBtn" type="button">قراءة فاتورة PDF</button>
+<input id="pdf" type="file" accept="application/pdf" hidden>
+</div>
+<p class="msg" id="msg" role="status"></p>
+
+<h2>التكاليف بالدولار</h2>
+<div class="row">
+<div><label for="price">سعر المزاد</label><input id="price" class="num" type="number" min="0" step="any"></div>
+<div><label for="fees">رسوم المزاد</label><input id="fees" class="num" type="number" min="0" step="any"></div>
+<div><label for="inland">النقل داخل أمريكا</label><input id="inland" class="num" type="number" min="0" step="any"></div>
+<div><label for="freight">الشحن البحري</label><input id="freight" class="num" type="number" min="0" step="any"></div>
+<div><label for="port">رسوم الميناء والتخليص</label><input id="port" class="num" type="number" min="0" step="any"></div>
+<div><label for="other">مصاريف أخرى</label><input id="other" class="num" type="number" min="0" step="any"></div>
+</div>
+
+<h2 style="margin-top:20px">المعدلات</h2>
+<div class="row">
+<div><label for="rate">دولار ← ريال عماني</label><input id="rate" class="num" type="number" step="any" value="0.3845"></div>
+<div><label for="duty">الجمارك %</label><input id="duty" class="num" type="number" step="any" value="5"></div>
+<div><label for="ins">التأمين %</label><input id="ins" class="num" type="number" step="any" value="0"></div>
+</div>
+</section>
+
+<div>
+<section aria-labelledby="h-res">
+<h2 id="h-res">الكشف</h2>
+<ul class="ledger" id="ledger"></ul>
+<div class="total"><span>الإجمالي بالريال العماني</span><b id="totOMR">0.000</b></div>
+<div class="bar">
+<button id="save" type="button">حفظ السيارة</button>
+<button class="ghost" id="xl" type="button">تصدير Excel</button>
+</div>
+</section>
+<section style="margin-top:20px" aria-labelledby="h-list">
+<h2 id="h-list">السيارات المحفوظة</h2>
+<table><thead><tr><th>اللوت</th><th>VIN</th><th>الإجمالي (ر.ع)</th><th></th></tr></thead><tbody id="list"></tbody></table>
+</section>
+</div>
+</main>
+
+<script src="lib/xlsx.full.min.js"></script>
+<script src="lib/pdf.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const COST=['price','fees','inland','freight','port','other'];
+const SET=['rate','duty','ins'];
+const TXT=['link','lot','yard','vin'];
+const LABELS={price:'سعر المزاد',fees:'رسوم المزاد',inland:'النقل داخل أمريكا',freight:'الشحن البحري',ins:'التأمين',duty:'الجمارك',port:'رسوم الميناء والتخليص',other:'مصاريف أخرى'};
+const g=id=>parseFloat($(id).value)||0;
+const f=(n,d=2)=>n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const store={get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let cars=store.get('misbar.cars',[]);
+
+function calc(){
+  const rate=g('rate'),p=g('price'),fe=g('fees'),inl=g('inland'),fr=g('freight');
+  const ins=(p+fe+inl+fr)*g('ins')/100;
+  const cif=p+fe+inl+fr+ins;
+  const duty=cif*g('duty')/100;
+  const total=cif+duty+g('port')+g('other');
+  return {rate,p,fe,inl,fr,ins,cif,duty,port:g('port'),other:g('other'),total,omr:total*rate};
+}
+function render(){
+  const c=calc();
+  const row=(l,v,cls='')=>`<li class="${cls}"><span>${l}</span><span class="v">$${f(v)} · ${f(v*c.rate,3)} ر.ع</span></li>`;
+  $('ledger').innerHTML=row(LABELS.price,c.p)+row(LABELS.fees,c.fe)+row(LABELS.inland,c.inl)+row(LABELS.freight,c.fr)+row(LABELS.ins,c.ins)
+   +row('القيمة CIF',c.cif,'sub')+row(LABELS.duty+' ('+f(g('duty'),1)+'%)',c.duty)+row(LABELS.port,c.port)+row(LABELS.other,c.other)+row('الإجمالي',c.total,'sub');
+  $('totOMR').textContent=f(c.omr,3)+' ر.ع';
+  [...COST,...SET,...TXT].forEach(k=>store.set('misbar.in.'+k,$(k).value));
+}
+function msg(t,err){const m=$('msg');m.textContent=t;m.className='msg'+(err?' err':'')}
+function checkVin(){const v=$('vin').value.toUpperCase();$('vin').value=v;
+  if(!v)return msg('');
+  if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(v))return msg('رقم VIN يجب أن يكون 17 خانة بدون الحروف I وO وQ.',true);
+  msg('رقم VIN صحيح الشكل.');}
+function fromLink(){const m=$('link').value.match(/\/lot\/(\d+)/);if(m){$('lot').value=m[1];render()}}
+
+async function readPdf(file){
+  try{
+    pdfjsLib.GlobalWorkerOptions.workerSrc='lib/pdf.worker.min.js';
+    const doc=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+    let t='';
+    for(let i=1;i<=doc.numPages;i++){t+=(await(await doc.getPage(i)).getTextContent()).items.map(x=>x.str).join(' ')+' '}
+    const vin=(t.toUpperCase().match(/\b[A-HJ-NPR-Z0-9]{17}\b/)||[])[0];
+    const lot=(t.match(/lot\s*(?:#|number|no\.?)?\s*[:#]?\s*(\d{6,9})/i)||[])[1];
+    if(vin)$('vin').value=vin; if(lot)$('lot').value=lot;
+    render(); checkVin();
+    if(!vin&&!lot)msg('لم أجد VIN أو رقم لوت في الملف. أدخلهما يدوياً.',true);
+  }catch(e){msg('تعذّرت قراءة الملف. تأكد أنه PDF نصّي وليس صورة.',true)}
+}
+function renderList(){
+  $('list').innerHTML=cars.length?cars.map((c,i)=>`<tr><td class="n">${c.lot||'-'}</td><td class="n">${c.vin||'-'}</td><td class="n">${f(c.omr,3)}</td><td><button class="ghost" data-del="${i}" aria-label="حذف">حذف</button></td></tr>`).join('')
+   :'<tr><td colspan="4">لا توجد سيارات. أدخل البيانات واضغط «حفظ السيارة».</td></tr>';
+}
+function exportXlsx(){
+  const rows=cars.length?cars:[Object.assign({lot:$('lot').value,vin:$('vin').value,yard:$('yard').value},calc())];
+  const data=rows.map(c=>({'اللوت':c.lot,'VIN':c.vin,'الساحة':c.yard,'سعر المزاد $':c.p,'رسوم المزاد $':c.fe,'نقل داخلي $':c.inl,'شحن بحري $':c.fr,'تأمين $':c.ins,'CIF $':c.cif,'جمارك $':c.duty,'ميناء وتخليص $':c.port,'أخرى $':c.other,'الإجمالي $':c.total,'سعر الصرف':c.rate,'الإجمالي ر.ع':c.omr}));
+  const ws=XLSX.utils.json_to_sheet(data),wb=XLSX.utils.book_new();
+  wb.Workbook={Views:[{RTL:true}]};
+  XLSX.utils.book_append_sheet(wb,ws,'السيارات');
+  XLSX.writeFile(wb,'misbar.xlsx');
+}
+
+[...COST,...SET,...TXT].forEach(k=>{const v=store.get('misbar.in.'+k,null);if(v!==null)$(k).value=v});
+document.addEventListener('input',e=>{if(e.target.id==='link')fromLink();if(e.target.id==='vin')checkVin();render()});
+$('pdfBtn').onclick=()=>$('pdf').click();
+$('pdf').onchange=e=>e.target.files[0]&&readPdf(e.target.files[0]);
+$('save').onclick=()=>{cars.push(Object.assign({lot:$('lot').value,vin:$('vin').value,yard:$('yard').value},calc()));store.set('misbar.cars',cars);renderList();msg('تم حفظ السيارة.')};
+$('xl').onclick=exportXlsx;
+$('list').onclick=e=>{const i=e.target.dataset.del;if(i!==undefined){cars.splice(+i,1);store.set('misbar.cars',cars);renderList()}};
+render();renderList();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
